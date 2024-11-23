@@ -1,34 +1,31 @@
 import streamlit as st
 import pandas as pd
+import joblib
+import shap
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from sklearn.ensemble import RandomForestRegressor
 
-st.tittle("""
-# Pakistan House Price Prediction App
-""")
+st.title('Pakistan House Price Prediction')
 st.write('---')
 
-url = 'https://drive.google.com/file/d/1HPzLNrEIBduaatuEsf7EDWJ2_J0f4T2N/view?usp=sharing'
-url = 'https://drive.google.com/uc?id=' + url.split('/')[-2]
+# Load dataset
+url = 'https://drive.google.com/uc?id=1HPzLNrEIBduaatuEsf7EDWJ2_J0f4T2N'
 data = pd.read_csv(url)
 
-data = data.drop(columns=['property_id','page_url', 'location_id', 'province_name', 'latitude', 'longitude', 'date_added', 'agency', 'agent','Area Category' ])
-data.head()
+# Data preprocessing
+data = data.drop(columns=['property_id', 'page_url', 'location_id', 'province_name', 'latitude', 'longitude', 
+                          'date_added', 'agency', 'agent', 'Area Category'])
 data.drop_duplicates(inplace=True)
 data.dropna(inplace=True)
-data.drop(data[data['price']==0].index, inplace = True)
-data.drop(data[data['baths']==0].index, inplace = True)
-data.drop(data[data['bedrooms']==0].index, inplace = True)
-data.drop(data[data['Area Size']==0].index, inplace = True)
+data = data[(data['price'] > 0) & (data['baths'] > 0) & (data['bedrooms'] > 0) & (data['Area Size'] > 0)]
 
-data['Area Size'] = data.apply(lambda row: row['Area Size'] * 272.51
-                               if row['Area Type'] == 'Marla'
+data['Area Size'] = data.apply(lambda row: row['Area Size'] * 272.51 if row['Area Type'] == 'Marla' 
                                else row['Area Size'] * 5445, axis=1)
-data.drop(['Area Type'], axis = 1, inplace = True)
+data.drop(['Area Type'], axis=1, inplace=True)
 
+# Outlier removal
 X_data = data.select_dtypes(include=['float64', 'int64'])
 Q1 = X_data.quantile(0.25)
 Q3 = X_data.quantile(0.75)
@@ -36,79 +33,68 @@ IQR = Q3 - Q1
 outlier_condition = (X_data < (Q1 - 1.5 * IQR)) | (X_data > (Q3 + 1.5 * IQR))
 data = data[~outlier_condition.any(axis=1)]
 
+# Scaling
 scaler = MinMaxScaler()
-data[['price_scaled', 'area_scaled', 'baths_scaled', 'bedrooms_scaled']] = scaler.fit_transform(data[['price', 'Area Size', 'baths', 'bedrooms']])
+data[['price_scaled', 'area_scaled', 'baths_scaled', 'bedrooms_scaled']] = scaler.fit_transform(
+    data[['price', 'Area Size', 'baths', 'bedrooms']])
 data = data.drop(columns=['price', 'Area Size', 'baths', 'bedrooms'])
 
-X = data[['area_scaled', 'baths_scaled', 'bedrooms_scaled']]
-y = data['price_scaled']
+# Encoding
+le = LabelEncoder()
+data['purpose'] = le.fit_transform(data['purpose'])
+data['property_type'] = le.fit_transform(data['property_type'])
+data['city'] = le.fit_transform(data['city'])
+data['location'] = le.fit_transform(data['location'])
 
+# Splitting data
+X = data.drop(['price_scaled'], axis=1)
+y = data['price_scaled']
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Sidebar
-# Header of Specify Input Parameters
-st.sidebar.header('Specify Input Parameters')
+# Input form
+def user_input():
+    with st.form("input_form"):
+        st.header("Enter House Details")
+        property_type = st.selectbox('Property Type', data['property_type'].unique())
+        location = st.selectbox('Location', data['location'].unique())
+        city = st.selectbox('City', data['city'].unique())
+        baths = st.slider('Baths', 1, 7)
+        purpose = st.selectbox('Purpose', data['purpose'].unique())
+        bedrooms = st.slider('Bedrooms', 1, 7)
+        area_size = st.number_input('Area Size', 1, 1000)
+        area = area_size * 272.51
+        submitted = st.form_submit_button("Submit")
+        if submitted:
+            input_data = {'property_type': property_type,
+                          'location': location,
+                          'city': city,
+                          'purpose': purpose,
+                          'area_scaled': area,
+                          'baths_scaled': baths,
+                          'bedrooms_scaled': bedrooms}
+            return pd.DataFrame([input_data])
+        return None
 
-def user_input_features():
-    CRIM = st.sidebar.slider('CRIM', X.CRIM.min(), X.CRIM.max(), X.CRIM.mean())
-    ZN = st.sidebar.slider('ZN', X.ZN.min(), X.ZN.max(), X.ZN.mean())
-    INDUS = st.sidebar.slider('INDUS', X.INDUS.min(), X.INDUS.max(), X.INDUS.mean())
-    CHAS = st.sidebar.slider('CHAS', X.CHAS.min(), X.CHAS.max(), X.CHAS.mean())
-    NOX = st.sidebar.slider('NOX', X.NOX.min(), X.NOX.max(), X.NOX.mean())
-    RM = st.sidebar.slider('RM', X.RM.min(), X.RM.max(), X.RM.mean())
-    AGE = st.sidebar.slider('AGE', X.AGE.min(), X.AGE.max(), X.AGE.mean())
-    DIS = st.sidebar.slider('DIS', X.DIS.min(), X.DIS.max(), X.DIS.mean())
-    RAD = st.sidebar.slider('RAD', X.RAD.min(), X.RAD.max(), X.RAD.mean())
-    TAX = st.sidebar.slider('TAX', X.TAX.min(), X.TAX.max(), X.TAX.mean())
-    PTRATIO = st.sidebar.slider('PTRATIO', X.PTRATIO.min(), X.PTRATIO.max(), X.PTRATIO.mean())
-    B = st.sidebar.slider('B', X.B.min(), X.B.max(), X.B.mean())
-    LSTAT = st.sidebar.slider('LSTAT', X.LSTAT.min(), X.LSTAT.max(), X.LSTAT.mean())
-    data = {'CRIM': CRIM,
-            'ZN': ZN,
-            'INDUS': INDUS,
-            'CHAS': CHAS,
-            'NOX': NOX,
-            'RM': RM,
-            'AGE': AGE,
-            'DIS': DIS,
-            'RAD': RAD,
-            'TAX': TAX,
-            'PTRATIO': PTRATIO,
-            'B': B,
-            'LSTAT': LSTAT}
-    features = pd.DataFrame(data, index=[0])
-    return features
+df = user_input()
 
-df = user_input_features()
+# Prediction
+if df is not None:
+    df_scaled = scaler.transform(df)
+    model = RandomForestRegressor(random_state=42)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    joblib.dump(model, 'best_model.pkl')
+    best_model = joblib.load('best_model.pkl')
+    prediction = best_model.predict(df_scaled)
+    original_price = scaler.inverse_transform([[prediction[0], 0, 0, 0]])[0][0]
 
-# Main Panel
+    st.header('Predicted Price')
+    st.write(f"The predicted price is: {original_price:.2f}")
+    st.write('---')
 
-# Print specified input parameters
-st.header('Specified Input parameters')
-st.write(df)
-st.write('---')
-
-# Build Regression Model
-model = RandomForestRegressor()
-model.fit(X, Y)
-# Apply Model to Make Prediction
-prediction = model.predict(df)
-
-st.header('Prediction of MEDV')
-st.write(prediction)
-st.write('---')
-
-# Explaining the model's predictions using SHAP values
-# https://github.com/slundberg/shap
-explainer = shap.TreeExplainer(model)
-shap_values = explainer.shap_values(X)
-
-st.header('Feature Importance')
-plt.title('Feature importance based on SHAP values')
-shap.summary_plot(shap_values, X)
-st.pyplot(bbox_inches='tight')
-st.write('---')
-
-plt.title('Feature importance based on SHAP values (Bar)')
-shap.summary_plot(shap_values, X, plot_type="bar")
-st.pyplot(bbox_inches='tight')
+    # Feature Importance
+    explainer = shap.TreeExplainer(best_model)
+    shap_values = explainer.shap_values(X)
+    st.header('Feature Importance')
+    shap.summary_plot(shap_values, X, show=False)
+    st.pyplot(plt)
