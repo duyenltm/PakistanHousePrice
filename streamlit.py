@@ -51,6 +51,11 @@ X = data.drop(['price_scaled'], axis=1)
 y = data['price_scaled']
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
+# Train model
+model = RandomForestRegressor(random_state=42)
+model.fit(X_train, y_train)
+joblib.dump(model, 'best_model.pkl')
+
 # Input form
 def user_input():
     with st.form("input_form"):
@@ -79,13 +84,10 @@ df = user_input()
 
 # Prediction
 if df is not None:
-    df_scaled = scaler.transform(df)
-    model = RandomForestRegressor(random_state=42)
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    joblib.dump(model, 'best_model.pkl')
-    best_model = joblib.load('best_model.pkl')
-    prediction = best_model.predict(df_scaled)
+    # Ensure consistent column order
+    df = df[X.columns]  # Match training column order
+    model = joblib.load('best_model.pkl')
+    prediction = model.predict(df)
     original_price = scaler.inverse_transform([[prediction[0], 0, 0, 0]])[0][0]
 
     st.header('Predicted Price')
@@ -93,7 +95,7 @@ if df is not None:
     st.write('---')
 
     # Feature Importance
-    explainer = shap.TreeExplainer(best_model)
+    explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X)
     st.header('Feature Importance')
     shap.summary_plot(shap_values, X, show=False)
